@@ -45,9 +45,9 @@ export default function MenuCreator() {
   // ---------------------------------------------------------------------
   const handleRestaurantSelect = async (restaurantId) => {
     setSelectedRestaurantId(restaurantId);
-    setSavedMenus([]);      // Clear menus from previous restaurant
-    setSelectedMenuId(null); // Reset any selected menu
-    setMenuName('');         
+    setSavedMenus([]);
+    setSelectedMenuId(null);
+    setMenuName('');
     setMenuItems([]);
     setIsMenuChanged(false);
 
@@ -56,7 +56,6 @@ export default function MenuCreator() {
       return;
     }
 
-    // Now fetch menus for this restaurant
     try {
       const res = await fetch(`/api/menus?restaurantId=${restaurantId}`);
       if (!res.ok) throw new Error('Failed to fetch menus');
@@ -131,7 +130,7 @@ export default function MenuCreator() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: selectedMenuId,
-          restaurantId: selectedRestaurantId, // <--- from the restaurant selection
+          restaurantId: selectedRestaurantId,
           name: menuName,
           templateId: selectedTemplate,
         }),
@@ -140,7 +139,6 @@ export default function MenuCreator() {
       const menuData = await menuRes.json();
       const menuId = menuData.menu.id;
 
-      // If it was a new menu, add to our local list
       if (!selectedMenuId) {
         setSavedMenus((prev) => [...prev, menuData.menu]);
       }
@@ -194,7 +192,6 @@ export default function MenuCreator() {
   };
 
   const deleteMenuItem = async (itemId) => {
-    // Only delete from DB if item has an 'id'
     try {
       const res = await fetch(`/api/menuItems?itemId=${itemId}`, {
         method: 'DELETE',
@@ -211,7 +208,6 @@ export default function MenuCreator() {
   const removeMenuItem = async (index) => {
     const item = menuItems[index];
     if (item.id) {
-      // It's already in DB, so remove from DB first
       const success = await deleteMenuItem(item.id);
       if (!success) return;
     }
@@ -233,10 +229,42 @@ export default function MenuCreator() {
     setIsMenuChanged(true);
   };
 
-  // Bulk upload
   const handleBulkUpload = (items) => {
     setMenuItems((prev) => [...prev, ...items]);
     setIsMenuChanged(true);
+  };
+
+  // ---------------------------------------------------------------------
+  // NEW: Enhance Item Description Function
+  // ---------------------------------------------------------------------
+  const enhanceItemDescription = async (item, index) => {
+    try {
+      const res = await fetch('/api/ai/enhanceDescription', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: item.name,
+          oldDescription: item.description,
+          // For better results, pass brandVoice or restaurant data if desired
+          brandVoice: 'friendly and upbeat',
+        }),
+      });
+      if (!res.ok) throw new Error('Failed to enhance description');
+
+      const data = await res.json();
+      const newDesc = data.newDescription;
+
+      // Ask user if they accept
+      const userAccepted = confirm(
+        `Original:\n${item.description}\n\nProposed:\n${newDesc}\n\nAccept new description?`
+      );
+      if (userAccepted) {
+        updateMenuItem(index, 'description', newDesc);
+      }
+    } catch (err) {
+      console.error(err);
+      alert(err.message);
+    }
   };
 
   // ---------------------------------------------------------------------
@@ -445,7 +473,16 @@ export default function MenuCreator() {
                           <td className="px-6 py-4 text-sm text-gray-700">
                             {item.category || '-'}
                           </td>
-                          <td className="px-6 py-4">
+                          <td className="px-6 py-4 flex gap-3 items-center">
+                            {/* Enhance button */}
+                            <button
+                              onClick={() => enhanceItemDescription(item, idx)}
+                              className="text-blue-600 hover:text-blue-700"
+                            >
+                              Enhance
+                            </button>
+
+                            {/* Delete button */}
                             <button
                               onClick={() => removeMenuItem(idx)}
                               className="text-red-600 hover:text-red-700"
