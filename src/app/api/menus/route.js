@@ -3,7 +3,7 @@ import { query } from '@/lib/db';
 
 /**
  * GET /api/menus?restaurantId=1
- * Fetches all menus for a given restaurant
+ * Fetches all menus for a given restaurant.
  */
 export async function GET(request) {
   try {
@@ -17,7 +17,7 @@ export async function GET(request) {
       );
     }
 
-    // Example DB query to fetch all menus:
+    // Query to fetch all menus for the specified restaurant
     const result = await query(
       'SELECT * FROM menus WHERE restaurant_id = $1',
       [restaurantId]
@@ -101,9 +101,9 @@ export async function DELETE(request) {
       );
     }
 
-    // If you have a foreign key constraint on items, you might do:
+    // If you have a foreign key on menu_items (menu_id -> menus.id) with ON DELETE CASCADE,
+    // you don't need to manually delete items here. Otherwise:
     // await query('DELETE FROM menu_items WHERE menu_id = $1', [menuId]);
-    // Or rely on ON DELETE CASCADE in your DB schema.
 
     const deleteResult = await query(
       'DELETE FROM menus WHERE id = $1 RETURNING *',
@@ -114,7 +114,6 @@ export async function DELETE(request) {
       return NextResponse.json({ error: 'Menu not found' }, { status: 404 });
     }
 
-    // Return success
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error('Error deleting menu:', err);

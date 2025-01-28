@@ -6,6 +6,11 @@ import BulkUpload from './BulkUpload';
 import { MenuPreview } from '../menu-preview/MenuPreview';
 
 export default function MenuCreator() {
+  // ----------------- NEW STATES FOR RESTAURANT SELECTION -----------------
+  const [restaurants, setRestaurants] = useState([]);
+  const [selectedRestaurantId, setSelectedRestaurantId] = useState(null);
+
+  // ----------------- EXISTING STATES FOR MENUS/ITEMS -----------------
   const [menuName, setMenuName] = useState('');
   const [selectedMenuId, setSelectedMenuId] = useState(null);
   const [selectedTemplate, setSelectedTemplate] = useState('modern');
@@ -18,33 +23,68 @@ export default function MenuCreator() {
   const [newItemDescription, setNewItemDescription] = useState('');
   const [newItemPrice, setNewItemPrice] = useState('');
 
+  // ---------------------------------------------------------------------
+  // 1) Load the list of restaurants on mount
+  // ---------------------------------------------------------------------
   useEffect(() => {
-    const fetchMenus = async () => {
+    const fetchRestaurants = async () => {
       try {
-        const res = await fetch('/api/menus?restaurantId=1');
-        if (!res.ok) throw new Error('Failed to fetch menus');
+        const res = await fetch('/api/restaurants');
+        if (!res.ok) throw new Error('Failed to fetch restaurants');
         const data = await res.json();
-        setSavedMenus(data.menus || []);
+        setRestaurants(data.restaurants || []);
       } catch (err) {
-        console.error('Error fetching menus:', err);
+        console.error('Error fetching restaurants:', err);
       }
     };
-    fetchMenus();
+    fetchRestaurants();
   }, []);
 
+  // ---------------------------------------------------------------------
+  // 2) When user selects a restaurant in the dropdown, we fetch its menus
+  // ---------------------------------------------------------------------
+  const handleRestaurantSelect = async (restaurantId) => {
+    setSelectedRestaurantId(restaurantId);
+    setSavedMenus([]);      // Clear menus from previous restaurant
+    setSelectedMenuId(null); // Reset any selected menu
+    setMenuName('');         
+    setMenuItems([]);
+    setIsMenuChanged(false);
+
+    if (!restaurantId) {
+      // User picked blank
+      return;
+    }
+
+    // Now fetch menus for this restaurant
+    try {
+      const res = await fetch(`/api/menus?restaurantId=${restaurantId}`);
+      if (!res.ok) throw new Error('Failed to fetch menus');
+      const data = await res.json();
+      setSavedMenus(data.menus || []);
+    } catch (err) {
+      console.error('Error fetching menus:', err);
+    }
+  };
+
+  // ---------------------------------------------------------------------
+  // 3) Fetch items for a selected menu
+  // ---------------------------------------------------------------------
   const fetchMenuItems = async (menuId) => {
     try {
       setIsLoading(true);
       const res = await fetch(`/api/menuItems?menuId=${menuId}`);
       if (!res.ok) throw new Error('Failed to fetch menu items');
       const data = await res.json();
-      setMenuItems(data.menuItems.map(item => ({
-        id: item.id,
-        name: item.name,
-        description: item.description,
-        price: item.price,
-        category: item.category
-      })));
+      setMenuItems(
+        data.menuItems.map((item) => ({
+          id: item.id,
+          name: item.name,
+          description: item.description,
+          price: item.price,
+          category: item.category,
+        }))
+      );
     } catch (err) {
       console.error('Error fetching menu items:', err);
     } finally {
@@ -52,8 +92,12 @@ export default function MenuCreator() {
     }
   };
 
+  // ---------------------------------------------------------------------
+  // 4) Handle menu selection from the 'Select or Create Menu' dropdown
+  // ---------------------------------------------------------------------
   const handleMenuSelect = (menuId) => {
     if (!menuId) {
+      // User picked "New Menu"
       setSelectedMenuId(null);
       setMenuName('');
       setSelectedTemplate('modern');
@@ -61,6 +105,7 @@ export default function MenuCreator() {
       setIsMenuChanged(false);
       return;
     }
+    // Existing menu
     const existingMenu = savedMenus.find((m) => m.id === menuId);
     setSelectedMenuId(menuId);
     setMenuName(existingMenu?.name || '');
@@ -69,29 +114,39 @@ export default function MenuCreator() {
     setIsMenuChanged(false);
   };
 
+  // ---------------------------------------------------------------------
+  // 5) Save (create or update) the menu, then save items
+  // ---------------------------------------------------------------------
   const saveMenuToDB = async () => {
     try {
+      if (!selectedRestaurantId) {
+        alert('Please select a restaurant first!');
+        return;
+      }
+
       setIsLoading(true);
+      // Upsert the menu
       const menuRes = await fetch('/api/menus', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: selectedMenuId,
-          restaurantId: 1,
+          restaurantId: selectedRestaurantId, // <--- from the restaurant selection
           name: menuName,
           templateId: selectedTemplate,
         }),
       });
-
       if (!menuRes.ok) throw new Error('Failed to save menu');
       const menuData = await menuRes.json();
       const menuId = menuData.menu.id;
 
+      // If it was a new menu, add to our local list
       if (!selectedMenuId) {
         setSavedMenus((prev) => [...prev, menuData.menu]);
       }
       setSelectedMenuId(menuId);
 
+      // Save items (create/update)
       for (const item of menuItems) {
         const itemRes = await fetch('/api/menuItems', {
           method: 'POST',
@@ -118,9 +173,11 @@ export default function MenuCreator() {
     }
   };
 
+  // ---------------------------------------------------------------------
+  // 6) Menu Items: Add / Remove / Update
+  // ---------------------------------------------------------------------
   const addMenuItem = () => {
     if (!newItemName) return;
-    
     setMenuItems((prev) => [
       ...prev,
       {
@@ -137,6 +194,7 @@ export default function MenuCreator() {
   };
 
   const deleteMenuItem = async (itemId) => {
+    // Only delete from DB if item has an 'id'
     try {
       const res = await fetch(`/api/menuItems?itemId=${itemId}`, {
         method: 'DELETE',
@@ -152,13 +210,13 @@ export default function MenuCreator() {
 
   const removeMenuItem = async (index) => {
     const item = menuItems[index];
-    
     if (item.id) {
+      // It's already in DB, so remove from DB first
       const success = await deleteMenuItem(item.id);
       if (!success) return;
     }
 
-    setMenuItems(prev => {
+    setMenuItems((prev) => {
       const updated = [...prev];
       updated.splice(index, 1);
       return updated;
@@ -175,35 +233,78 @@ export default function MenuCreator() {
     setIsMenuChanged(true);
   };
 
+  // Bulk upload
   const handleBulkUpload = (items) => {
-    setMenuItems(prev => [...prev, ...items]);
+    setMenuItems((prev) => [...prev, ...items]);
     setIsMenuChanged(true);
   };
 
+  // ---------------------------------------------------------------------
+  // 7) Rendering
+  // ---------------------------------------------------------------------
   return (
     <div className="flex min-h-screen">
-      {/* Left Sidebar */}
+      {/* LEFT SIDEBAR */}
       <div className="w-48 bg-white border-r">
         <div className="p-4 font-medium text-gray-800">Website Menu</div>
         <nav className="space-y-1">
-          <a href="#" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Dashboard</a>
-          <a href="#" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Templates</a>
-          <a href="#" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Support</a>
+          <a
+            href="#"
+            className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+          >
+            Dashboard
+          </a>
+          <a
+            href="#"
+            className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+          >
+            Templates
+          </a>
+          <a
+            href="#"
+            className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+          >
+            Support
+          </a>
         </nav>
       </div>
 
-      {/* Main Content */}
+      {/* MAIN CONTENT */}
       <div className="flex-1 bg-gray-50">
-        {/* Header */}
+        {/* HEADER */}
         <header className="bg-white border-b px-6 py-4">
           <div className="flex justify-between items-center">
             <h1 className="text-xl font-medium text-gray-800">Menu Creator</h1>
           </div>
         </header>
 
-        {/* Content */}
+        {/* CONTENT */}
         <div className="p-6 max-w-4xl mx-auto">
-          {/* Menu Selection */}
+          {/* (A) SELECT RESTAURANT */}
+          <div className="bg-white rounded-lg shadow-sm mb-6">
+            <div className="p-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Select a Restaurant
+              </label>
+              <select
+                className="p-2 border rounded-md text-gray-700"
+                value={selectedRestaurantId || ''}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  handleRestaurantSelect(val ? Number(val) : null);
+                }}
+              >
+                <option value="">-- Choose --</option>
+                {restaurants.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* (B) SELECT OR CREATE MENU */}
           <div className="bg-white rounded-lg shadow-sm mb-6">
             <div className="p-6">
               <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -217,6 +318,7 @@ export default function MenuCreator() {
                     handleMenuSelect(val ? Number(val) : null);
                   }}
                   className="flex-1 p-2 border rounded-md text-gray-700"
+                  disabled={!selectedRestaurantId}
                 >
                   <option value="">-- New Menu --</option>
                   {savedMenus.map((menu) => (
@@ -229,15 +331,29 @@ export default function MenuCreator() {
             </div>
           </div>
 
-          {/* Template Selection - Always visible */}
+          {/* (C) TEMPLATE SELECTION */}
           <div className="bg-white rounded-lg shadow-sm mb-6">
             <div className="p-6">
-              <h2 className="text-lg font-medium text-gray-800 mb-4">Template Style</h2>
+              <h2 className="text-lg font-medium text-gray-800 mb-4">
+                Template Style
+              </h2>
               <div className="grid grid-cols-3 gap-4">
                 {[
-                  { id: 'modern', name: 'Modern', description: 'Clean and contemporary layout' },
-                  { id: 'classic', name: 'Classic', description: 'Traditional elegant design' },
-                  { id: 'minimal', name: 'Minimal', description: 'Simple and straightforward' },
+                  {
+                    id: 'modern',
+                    name: 'Modern',
+                    description: 'Clean and contemporary layout',
+                  },
+                  {
+                    id: 'classic',
+                    name: 'Classic',
+                    description: 'Traditional elegant design',
+                  },
+                  {
+                    id: 'minimal',
+                    name: 'Minimal',
+                    description: 'Simple and straightforward',
+                  },
                 ].map((template) => (
                   <div
                     key={template.id}
@@ -251,19 +367,25 @@ export default function MenuCreator() {
                         : 'border-gray-200 hover:border-[#FF7A5C]'
                     }`}
                   >
-                    <div className="font-medium text-gray-800 mb-1">{template.name}</div>
-                    <div className="text-sm text-gray-600">{template.description}</div>
+                    <div className="font-medium text-gray-800 mb-1">
+                      {template.name}
+                    </div>
+                    <div className="text-sm text-gray-600">
+                      {template.description}
+                    </div>
                   </div>
                 ))}
               </div>
             </div>
           </div>
 
-          {/* Menu Details for New Menu */}
+          {/* (D) MENU DETAILS FOR NEW MENU ONLY */}
           {selectedMenuId === null && (
             <div className="bg-white rounded-lg shadow-sm mb-6">
               <div className="p-6">
-                <h2 className="text-lg font-medium text-gray-800 mb-4">Menu Details</h2>
+                <h2 className="text-lg font-medium text-gray-800 mb-4">
+                  Menu Details
+                </h2>
                 <input
                   type="text"
                   placeholder="Menu Name"
@@ -278,31 +400,51 @@ export default function MenuCreator() {
             </div>
           )}
 
-          {/* Menu Items */}
+          {/* (E) MENU ITEMS */}
           <div className="bg-white rounded-lg shadow-sm">
             <div className="p-6">
-              <h2 className="text-lg font-medium text-gray-800 mb-4">Menu Items</h2>
-              
-              {/* Menu Items Table */}
+              <h2 className="text-lg font-medium text-gray-800 mb-4">
+                Menu Items
+              </h2>
+
+              {/* Items Table */}
               {menuItems.length > 0 && (
                 <div className="mb-6 overflow-hidden rounded-lg border border-gray-200">
                   <table className="w-full">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="px-6 py-3 text-left text-sm font-medium text-gray-700">Name</th>
-                        <th className="px-6 py-3 text-left text-sm font-medium text-gray-700">Description</th>
-                        <th className="px-6 py-3 text-left text-sm font-medium text-gray-700 w-32">Price</th>
-                        <th className="px-6 py-3 text-left text-sm font-medium text-gray-700 w-40">Category</th>
-                        <th className="px-6 py-3 text-left text-sm font-medium text-gray-700 w-24">Actions</th>
+                        <th className="px-6 py-3 text-left text-sm font-medium text-gray-700">
+                          Name
+                        </th>
+                        <th className="px-6 py-3 text-left text-sm font-medium text-gray-700">
+                          Description
+                        </th>
+                        <th className="px-6 py-3 text-left text-sm font-medium text-gray-700 w-32">
+                          Price
+                        </th>
+                        <th className="px-6 py-3 text-left text-sm font-medium text-gray-700 w-40">
+                          Category
+                        </th>
+                        <th className="px-6 py-3 text-left text-sm font-medium text-gray-700 w-24">
+                          Actions
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
                       {menuItems.map((item, idx) => (
                         <tr key={item.id ?? idx} className="hover:bg-gray-50">
-                          <td className="px-6 py-4 text-sm text-gray-700">{item.name || '-'}</td>
-                          <td className="px-6 py-4 text-sm text-gray-600">{item.description || '-'}</td>
-                          <td className="px-6 py-4 text-sm text-gray-700">${item.price || '0.00'}</td>
-                          <td className="px-6 py-4 text-sm text-gray-700">{item.category || '-'}</td>
+                          <td className="px-6 py-4 text-sm text-gray-700">
+                            {item.name || '-'}
+                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-600">
+                            {item.description || '-'}
+                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-700">
+                            ${item.price || '0.00'}
+                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-700">
+                            {item.category || '-'}
+                          </td>
                           <td className="px-6 py-4">
                             <button
                               onClick={() => removeMenuItem(idx)}
@@ -371,7 +513,11 @@ export default function MenuCreator() {
                     disabled={isLoading}
                     className="flex items-center justify-center flex-1 bg-[#FF7A5C] text-white py-2 rounded-md hover:bg-[#ff6647] disabled:opacity-50 transition-colors"
                   >
-                    {isLoading ? 'Saving...' : (selectedMenuId ? 'Save Changes' : 'Create Menu')}
+                    {isLoading
+                      ? 'Saving...'
+                      : selectedMenuId
+                      ? 'Save Changes'
+                      : 'Create Menu'}
                   </button>
                 )}
               </div>
