@@ -1,7 +1,9 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { PlusCircle, Trash2 } from 'lucide-react';
+import { PlusCircle, Trash2, Eye } from 'lucide-react';
+import BulkUpload from './BulkUpload';
+import { MenuPreview } from '../menu-preview/MenuPreview';
 
 export default function MenuCreator() {
   const [menuName, setMenuName] = useState('');
@@ -10,8 +12,9 @@ export default function MenuCreator() {
   const [menuItems, setMenuItems] = useState([]);
   const [savedMenus, setSavedMenus] = useState([]);
   const [isMenuChanged, setIsMenuChanged] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
 
-  // Fetch existing menus on mount
   useEffect(() => {
     const fetchMenus = async () => {
       try {
@@ -26,22 +29,28 @@ export default function MenuCreator() {
     fetchMenus();
   }, []);
 
-  // Fetch items for the selected menu
   const fetchMenuItems = async (menuId) => {
     try {
+      setIsLoading(true);
       const res = await fetch(`/api/menuItems?menuId=${menuId}`);
       if (!res.ok) throw new Error('Failed to fetch menu items');
       const data = await res.json();
-      setMenuItems(data.menuItems || []);
+      setMenuItems(data.menuItems.map(item => ({
+        id: item.id,
+        name: item.name,
+        description: item.description,
+        price: item.price,
+        category: item.category
+      })));
     } catch (err) {
       console.error('Error fetching menu items:', err);
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  // Handle selecting a menu (or new menu)
   const handleMenuSelect = (menuId) => {
     if (!menuId) {
-      // NEW menu
       setSelectedMenuId(null);
       setMenuName('');
       setSelectedTemplate('modern');
@@ -49,7 +58,6 @@ export default function MenuCreator() {
       setIsMenuChanged(false);
       return;
     }
-    // Existing menu
     const existingMenu = savedMenus.find((m) => m.id === menuId);
     setSelectedMenuId(menuId);
     setMenuName(existingMenu?.name || '');
@@ -58,7 +66,36 @@ export default function MenuCreator() {
     setIsMenuChanged(false);
   };
 
-  // Add a new item in local state
+  const deleteMenuItem = async (itemId) => {
+    try {
+      const res = await fetch(`/api/menuItems?itemId=${itemId}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) throw new Error('Failed to delete item');
+      return true;
+    } catch (err) {
+      console.error('Error deleting item:', err);
+      alert('Failed to delete item');
+      return false;
+    }
+  };
+
+  const removeMenuItem = async (index) => {
+    const item = menuItems[index];
+    
+    if (item.id) {
+      const success = await deleteMenuItem(item.id);
+      if (!success) return;
+    }
+
+    setMenuItems(prev => {
+      const updated = [...prev];
+      updated.splice(index, 1);
+      return updated;
+    });
+    setIsMenuChanged(true);
+  };
+
   const addMenuItem = () => {
     setMenuItems((prev) => [
       ...prev,
@@ -67,7 +104,6 @@ export default function MenuCreator() {
     setIsMenuChanged(true);
   };
 
-  // Update an item in local state
   const updateMenuItem = (index, field, value) => {
     setMenuItems((prev) => {
       const updated = [...prev];
@@ -77,107 +113,93 @@ export default function MenuCreator() {
     setIsMenuChanged(true);
   };
 
-  // Remove an item from local state
-  const removeMenuItem = (index) => {
-    setMenuItems((prev) => {
-      const updated = [...prev];
-      updated.splice(index, 1);
-      return updated;
-    });
+  const handleBulkUpload = (items) => {
+    setMenuItems(prev => [...prev, ...items]);
     setIsMenuChanged(true);
   };
 
-  // Save (create/update) the menu
-  const saveMenuToDB = async () => {
-    try {
-      // Upsert the menu
-      const menuRes = await fetch('/api/menus', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: selectedMenuId,
-          restaurantId: 1,
-          name: menuName,
-          templateId: selectedTemplate,
-        }),
-      });
-      if (!menuRes.ok) throw new Error('Failed to save menu');
-      const menuData = await menuRes.json();
-      const menuId = menuData.menu.id;
+  {selectedMenuId === null && (
+    <div className="bg-white border rounded-lg shadow-sm p-6 mb-8">
+      <h2 className="text-lg font-semibold mb-4">Menu Details</h2>
+      
+      {/* Menu Name Input */}
+      <input
+        type="text"
+        placeholder="Menu Name"
+        value={menuName}
+        onChange={(e) => {
+          setMenuName(e.target.value);
+          setIsMenuChanged(true);
+        }}
+        className="w-full p-3 border rounded-lg mb-4"
+      />
+  
+      {/* Template Selection */}
+      <label className="block text-sm font-medium text-gray-700 mb-2">
+        Template
+      </label>
+      <select
+        value={selectedTemplate}
+        onChange={(e) => {
+          setSelectedTemplate(e.target.value);
+          setIsMenuChanged(true);
+        }}
+        className="w-full p-3 border rounded-lg"
+      >
+        <option value="modern">Modern</option>
+        <option value="classic">Classic</option>
+        <option value="minimal">Minimal</option>
+      </select>
+    </div>
+  )
 
-      // If new menu, add to local savedMenus
-      if (!selectedMenuId) {
-        setSavedMenus((prev) => [...prev, menuData.menu]);
-      }
-      setSelectedMenuId(menuId);
-
-      // Upsert each item
-      for (const item of menuItems) {
-        const itemRes = await fetch('/api/menuItems', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id: item.id, // update if present, else insert
-            menuId,
-            name: item.name,
-            description: item.description,
-            price: item.price,
-            category: item.category,
-          }),
-        });
-        if (!itemRes.ok) throw new Error('Failed to save menu item');
-      }
-
-      setIsMenuChanged(false);
-      alert('Menu and items saved successfully!');
-    } catch (err) {
-      console.error('Error saving menu:', err);
-      alert(`Error: ${err.message}`);
-    }
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-white text-gray-900">
-      {/* Header / Logo */}
-      <header className="p-4 border-b flex items-center justify-between">
+    <div className="w-full bg-white text-gray-900">
+      <header className="p-4 border-b flex items-center justify-between bg-white">
         <div className="text-xl font-bold">My Restaurant Logo</div>
-        {/* Could add a nav or user menu here */}
       </header>
 
-      {/* Main Container */}
-      <main className="flex-grow p-8 max-w-4xl mx-auto">
-        <h1 className="text-4xl font-extrabold mb-6">Menu Creator</h1>
+      <main className="p-8 max-w-4xl mx-auto bg-white">
+        <h1 className="text-3xl font-bold mb-8">Menu Creator</h1>
 
-        {/* Select or Create Menu */}
         <div className="mb-8">
           <label className="block text-sm font-medium text-gray-700 mb-2">
             Select or Create Menu
           </label>
-          <select
-            value={selectedMenuId || ''}
-            onChange={(e) => {
-              const val = e.target.value;
-              handleMenuSelect(val ? Number(val) : null);
-            }}
-            className="w-full p-3 border rounded-lg"
-          >
-            <option value="">-- New Menu --</option>
-            {savedMenus.map((menu) => (
-              <option key={menu.id} value={menu.id}>
-                {menu.name}
-              </option>
-            ))}
-          </select>
+          <div className="flex gap-4">
+            <select
+              value={selectedMenuId || ''}
+              onChange={(e) => {
+                const val = e.target.value;
+                handleMenuSelect(val ? Number(val) : null);
+              }}
+              className="flex-1 p-3 border rounded-lg"
+            >
+              <option value="">-- New Menu --</option>
+              {savedMenus.map((menu) => (
+                <option key={menu.id} value={menu.id}>
+                  {menu.name}
+                </option>
+              ))}
+            </select>
+            
+            {selectedMenuId === null && menuName && (
+              <button
+                onClick={saveMenuToDB}
+                disabled={isLoading}
+                className="px-6 py-2 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 disabled:opacity-50"
+              >
+                {isLoading ? 'Creating...' : 'Create Menu'}
+              </button>
+            )}
+          </div>
         </div>
 
-        {/* Menu Details */}
-        <div className="bg-gray-50 p-6 rounded-lg shadow-md mb-8">
-          <h2 className="text-lg font-semibold mb-4">Menu Details</h2>
-          {/* 
-            Show the Menu Name field ONLY if we are creating a new menu.
-            (selectedMenuId === null)
-          */}
-          {selectedMenuId === null && (
+        {selectedMenuId === null && (
+          <div className="bg-white border rounded-lg shadow-sm p-6 mb-8">
+            <h2 className="text-lg font-semibold mb-4">Menu Details</h2>
             <input
               type="text"
               placeholder="Menu Name"
@@ -188,111 +210,185 @@ export default function MenuCreator() {
               }}
               className="w-full p-3 border rounded-lg mb-4"
             />
-          )}
 
-          {/* Template selection is always visible (optional). 
-              If you only want it for new menus, wrap it in 
-              {selectedMenuId === null && (...)} as well. 
-          */}
-          <label className="block text-sm font-medium text-gray-700">
-            Template
-          </label>
-          <select
-            value={selectedTemplate}
-            onChange={(e) => {
-              setSelectedTemplate(e.target.value);
-              setIsMenuChanged(true);
-            }}
-            className="w-full p-3 border rounded-lg mt-2"
-          >
-            <option value="modern">Modern</option>
-            <option value="classic">Classic</option>
-            <option value="minimal">Minimal</option>
-          </select>
-        </div>
-
-        {/* Menu Items */}
-        <section>
-          <h2 className="text-lg font-semibold mb-4">Menu Items</h2>
-          {menuItems.length === 0 ? (
-            <p className="text-gray-500 italic">
-              No menu items yet. Add some!
-            </p>
-          ) : (
-            <div className="grid grid-cols-1 gap-6">
-              {menuItems.map((item, idx) => (
-                <div
-                  key={item.id ?? idx}
-                  className="bg-white p-4 rounded-lg shadow-sm border"
-                >
-                  <div className="space-y-2">
-                    <input
-                      type="text"
-                      placeholder="Item Name"
-                      value={item.name}
-                      onChange={(e) =>
-                        updateMenuItem(idx, 'name', e.target.value)
-                      }
-                      className="w-full p-2 border rounded"
-                    />
-                    <textarea
-                      placeholder="Description"
-                      value={item.description}
-                      onChange={(e) =>
-                        updateMenuItem(idx, 'description', e.target.value)
-                      }
-                      className="w-full p-2 border rounded"
-                    />
-                    <input
-                      type="number"
-                      placeholder="Price"
-                      value={item.price}
-                      onChange={(e) =>
-                        updateMenuItem(idx, 'price', e.target.value)
-                      }
-                      className="w-full p-2 border rounded"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Category"
-                      value={item.category}
-                      onChange={(e) =>
-                        updateMenuItem(idx, 'category', e.target.value)
-                      }
-                      className="w-full p-2 border rounded"
-                    />
-                  </div>
-                  <button
-                    onClick={() => removeMenuItem(idx)}
-                    className="mt-3 px-4 py-2 bg-red-500 text-white rounded flex items-center"
-                  >
-                    <Trash2 className="w-5 h-5 mr-2" />
-                    Remove Item
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <button
-            onClick={addMenuItem}
-            className="mt-6 px-6 py-3 bg-blue-600 text-white font-medium rounded-lg flex items-center"
-          >
-            <PlusCircle className="w-5 h-5 mr-2" />
-            Add Item
-          </button>
-        </section>
-
-        {/* Save Button */}
-        {isMenuChanged && (
-          <div className="flex justify-end mt-6">
-            <button
-              onClick={saveMenuToDB}
-              className="px-6 py-3 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700"
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Template
+            </label>
+            <select
+              value={selectedTemplate}
+              onChange={(e) => {
+                setSelectedTemplate(e.target.value);
+                setIsMenuChanged(true);
+              }}
+              className="w-full p-3 border rounded-lg"
             >
-              Save Menu
-            </button>
+              <option value="modern">Modern</option>
+              <option value="classic">Classic</option>
+              <option value="minimal">Minimal</option>
+            </select>
           </div>
+        )}
+        {/* Template Selection - Always visible */}
+<div className="bg-white border rounded-lg shadow-sm p-6 mb-8">
+  <div className="flex justify-between items-center mb-4">
+    <h2 className="text-lg font-semibold">Template Style</h2>
+    <button
+      onClick={() => setShowPreview(true)}
+      className="inline-flex items-center px-4 py-2 text-sm border border-transparent font-medium rounded-md text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 transition-colors"
+    >
+      <Eye className="w-4 h-4 mr-2" />
+      Preview Current Design
+    </button>
+  </div>
+  
+  <div className="grid grid-cols-3 gap-4">
+    {[
+      { id: 'modern', name: 'Modern', description: 'Clean and contemporary layout' },
+      { id: 'classic', name: 'Classic', description: 'Traditional elegant design' },
+      { id: 'minimal', name: 'Minimal', description: 'Simple and straightforward' },
+    ].map((template) => (
+      <div
+        key={template.id}
+        onClick={() => {
+          setSelectedTemplate(template.id);
+          setIsMenuChanged(true);
+        }}
+        className={`cursor-pointer p-4 rounded-lg border-2 transition-all ${
+          selectedTemplate === template.id
+            ? 'border-blue-500 bg-blue-50'
+            : 'border-gray-200 hover:border-blue-200'
+        }`}
+      >
+        <div className="font-medium mb-1">{template.name}</div>
+        <div className="text-sm text-gray-500">{template.description}</div>
+      </div>
+    ))}
+  </div>
+</div>
+        {(selectedMenuId || menuName) && (
+          <>
+            <BulkUpload onUploadSuccess={handleBulkUpload} />
+
+            <section className="mt-8">
+              <h2 className="text-lg font-semibold mb-4">Menu Items</h2>
+              {isLoading ? (
+                <p className="text-gray-500 italic">Loading...</p>
+              ) : menuItems.length === 0 ? (
+                <p className="text-gray-500 italic">
+                  No menu items yet. Add some!
+                </p>
+              ) : (
+                <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="bg-gray-50">
+                        <th className="px-6 py-4 text-left text-sm font-medium text-gray-700">Name</th>
+                        <th className="px-6 py-4 text-left text-sm font-medium text-gray-700">Description</th>
+                        <th className="px-6 py-4 text-left text-sm font-medium text-gray-700 w-32">Price</th>
+                        <th className="px-6 py-4 text-left text-sm font-medium text-gray-700 w-40">Category</th>
+                        <th className="px-6 py-4 text-left text-sm font-medium text-gray-700 w-32">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                      {menuItems.map((item, idx) => (
+                        <tr 
+                          key={item.id ?? idx} 
+                          className="transition-colors hover:bg-gray-50"
+                        >
+                          <td className="px-6 py-4">
+                            <input
+                              type="text"
+                              placeholder="Item Name"
+                              value={item.name}
+                              onChange={(e) => updateMenuItem(idx, 'name', e.target.value)}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            />
+                          </td>
+                          <td className="px-6 py-4">
+                            <textarea
+                              placeholder="Description"
+                              value={item.description}
+                              onChange={(e) => updateMenuItem(idx, 'description', e.target.value)}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                              rows="2"
+                            />
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="relative">
+                              <span className="absolute left-3 top-2.5 text-gray-500">$</span>
+                              <input
+                                type="number"
+                                step="0.01"
+                                placeholder="0.00"
+                                value={item.price}
+                                onChange={(e) => updateMenuItem(idx, 'price', e.target.value)}
+                                className="w-full pl-7 pr-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                              />
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <input
+                              type="text"
+                              placeholder="Category"
+                              value={item.category}
+                              onChange={(e) => updateMenuItem(idx, 'category', e.target.value)}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            />
+                          </td>
+                          <td className="px-6 py-4">
+                            <button
+                              onClick={() => removeMenuItem(idx)}
+                              className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors"
+                            >
+                              <Trash2 className="w-4 h-4 mr-1.5" />
+                              Remove
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <div className="flex gap-4 mt-6">
+                <button
+                  onClick={addMenuItem}
+                  className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
+                >
+                  <PlusCircle className="w-5 h-5 mr-2" />
+                  Add Item
+                </button>
+
+                <button
+                  onClick={() => setShowPreview(true)}
+                  className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 transition-colors"
+                >
+                  <Eye className="w-5 h-5 mr-2" />
+                  Preview Menu
+                </button>
+
+                {isMenuChanged && selectedMenuId && (
+                  <button
+                    onClick={saveMenuToDB}
+                    disabled={isLoading}
+                    className="inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50 transition-colors ml-auto"
+                  >
+                    {isLoading ? 'Saving...' : 'Save Changes'}
+                  </button>
+                )}
+              </div>
+            </section>
+          </>
+        )}
+
+        {showPreview && (
+          <MenuPreview
+            items={menuItems}
+            template={selectedTemplate}
+            menuName={menuName}
+            onClose={() => setShowPreview(false)}
+          />
         )}
       </main>
     </div>
