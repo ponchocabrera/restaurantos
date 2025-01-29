@@ -1,16 +1,15 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { PlusCircle, Trash2, Eye } from 'lucide-react';
+import { Eye, Trash2, Maximize2, Minimize2 } from 'lucide-react';
 import BulkUpload from './BulkUpload';
 import { MenuPreview } from '../menu-preview/MenuPreview';
 
 export default function MenuCreator() {
-  // ----------------- NEW STATES FOR RESTAURANT SELECTION -----------------
+  // ------------------- RESTAURANT + MENU STATES -------------------
   const [restaurants, setRestaurants] = useState([]);
   const [selectedRestaurantId, setSelectedRestaurantId] = useState(null);
 
-  // ----------------- EXISTING STATES FOR MENUS/ITEMS -----------------
   const [menuName, setMenuName] = useState('');
   const [selectedMenuId, setSelectedMenuId] = useState(null);
   const [selectedTemplate, setSelectedTemplate] = useState('modern');
@@ -19,13 +18,29 @@ export default function MenuCreator() {
   const [isMenuChanged, setIsMenuChanged] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+
+  // For adding a new item
   const [newItemName, setNewItemName] = useState('');
   const [newItemDescription, setNewItemDescription] = useState('');
   const [newItemPrice, setNewItemPrice] = useState('');
 
-  // ---------------------------------------------------------------------
-  // 1) Load the list of restaurants on mount
-  // ---------------------------------------------------------------------
+  // ------------------- AI SETTINGS (brandVoice, style, tone) -------------------
+  const [brandVoice, setBrandVoice] = useState('');
+  const [styleWanted, setStyleWanted] = useState('modern');
+  const [tone, setTone] = useState('friendly');
+
+  // Toggle panel for showing AI settings
+  const [showAiSettings, setShowAiSettings] = useState(false);
+
+  // For enlarging image in a modal
+  const [enlargedImageUrl, setEnlargedImageUrl] = useState(null);
+
+  // For disabling double-click on "Gen Image"
+  const [generatingImages, setGeneratingImages] = useState({});
+
+  // -------------------------------------------------------------------------
+  // 1) LOAD RESTAURANTS ON MOUNT
+  // -------------------------------------------------------------------------
   useEffect(() => {
     const fetchRestaurants = async () => {
       try {
@@ -40,9 +55,9 @@ export default function MenuCreator() {
     fetchRestaurants();
   }, []);
 
-  // ---------------------------------------------------------------------
-  // 2) When user selects a restaurant in the dropdown, we fetch its menus
-  // ---------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // 2) WHEN USER SELECTS A RESTAURANT, FETCH ITS MENUS
+  // -------------------------------------------------------------------------
   const handleRestaurantSelect = async (restaurantId) => {
     setSelectedRestaurantId(restaurantId);
     setSavedMenus([]);
@@ -51,10 +66,7 @@ export default function MenuCreator() {
     setMenuItems([]);
     setIsMenuChanged(false);
 
-    if (!restaurantId) {
-      // User picked blank
-      return;
-    }
+    if (!restaurantId) return;
 
     try {
       const res = await fetch(`/api/menus?restaurantId=${restaurantId}`);
@@ -66,9 +78,9 @@ export default function MenuCreator() {
     }
   };
 
-  // ---------------------------------------------------------------------
-  // 3) Fetch items for a selected menu
-  // ---------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // 3) FETCH ITEMS FOR THE SELECTED MENU
+  // -------------------------------------------------------------------------
   const fetchMenuItems = async (menuId) => {
     try {
       setIsLoading(true);
@@ -82,6 +94,7 @@ export default function MenuCreator() {
           description: item.description,
           price: item.price,
           category: item.category,
+          image_url: item.image_url || '',
         }))
       );
     } catch (err) {
@@ -91,12 +104,11 @@ export default function MenuCreator() {
     }
   };
 
-  // ---------------------------------------------------------------------
-  // 4) Handle menu selection from the 'Select or Create Menu' dropdown
-  // ---------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // 4) HANDLE MENU SELECTION
+  // -------------------------------------------------------------------------
   const handleMenuSelect = (menuId) => {
     if (!menuId) {
-      // User picked "New Menu"
       setSelectedMenuId(null);
       setMenuName('');
       setSelectedTemplate('modern');
@@ -104,7 +116,6 @@ export default function MenuCreator() {
       setIsMenuChanged(false);
       return;
     }
-    // Existing menu
     const existingMenu = savedMenus.find((m) => m.id === menuId);
     setSelectedMenuId(menuId);
     setMenuName(existingMenu?.name || '');
@@ -113,9 +124,9 @@ export default function MenuCreator() {
     setIsMenuChanged(false);
   };
 
-  // ---------------------------------------------------------------------
-  // 5) Save (create or update) the menu, then save items
-  // ---------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // 5) SAVE (CREATE OR UPDATE) THE MENU + ITEMS
+  // -------------------------------------------------------------------------
   const saveMenuToDB = async () => {
     try {
       if (!selectedRestaurantId) {
@@ -139,6 +150,7 @@ export default function MenuCreator() {
       const menuData = await menuRes.json();
       const menuId = menuData.menu.id;
 
+      // If it's a new menu, push to our local savedMenus
       if (!selectedMenuId) {
         setSavedMenus((prev) => [...prev, menuData.menu]);
       }
@@ -156,6 +168,7 @@ export default function MenuCreator() {
             description: item.description,
             price: item.price,
             category: item.category,
+            image_url: item.image_url || '',
           }),
         });
         if (!itemRes.ok) throw new Error('Failed to save menu item');
@@ -171,9 +184,9 @@ export default function MenuCreator() {
     }
   };
 
-  // ---------------------------------------------------------------------
-  // 6) Menu Items: Add / Remove / Update
-  // ---------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // 6) MENU ITEMS: ADD / REMOVE / UPDATE
+  // -------------------------------------------------------------------------
   const addMenuItem = () => {
     if (!newItemName) return;
     setMenuItems((prev) => [
@@ -183,6 +196,7 @@ export default function MenuCreator() {
         description: newItemDescription,
         price: newItemPrice,
         category: '',
+        image_url: '',
       },
     ]);
     setNewItemName('');
@@ -234,9 +248,10 @@ export default function MenuCreator() {
     setIsMenuChanged(true);
   };
 
-  // ---------------------------------------------------------------------
-  // NEW: Enhance Item Description Function
-  // ---------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // 7) AI-DRIVEN ENHANCEMENTS
+  // -------------------------------------------------------------------------
+  // (A) Enhance description
   const enhanceItemDescription = async (item, index) => {
     try {
       const res = await fetch('/api/ai/enhanceDescription', {
@@ -245,8 +260,9 @@ export default function MenuCreator() {
         body: JSON.stringify({
           name: item.name,
           oldDescription: item.description,
-          // For better results, pass brandVoice or restaurant data if desired
-          brandVoice: 'friendly and upbeat',
+          brandVoice,
+          styleWanted,
+          tone,
         }),
       });
       if (!res.ok) throw new Error('Failed to enhance description');
@@ -254,7 +270,6 @@ export default function MenuCreator() {
       const data = await res.json();
       const newDesc = data.newDescription;
 
-      // Ask user if they accept
       const userAccepted = confirm(
         `Original:\n${item.description}\n\nProposed:\n${newDesc}\n\nAccept new description?`
       );
@@ -267,13 +282,93 @@ export default function MenuCreator() {
     }
   };
 
-  // ---------------------------------------------------------------------
-  // 7) Rendering
-  // ---------------------------------------------------------------------
+  // (B) Generate Image
+  const generateImageForItem = async (item, index) => {
+    setGeneratingImages((prev) => ({ ...prev, [index]: true }));
+
+    try {
+      const res = await fetch('/api/ai/generateImage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          itemName: item.name,
+          brandVoice,
+          styleWanted,
+          tone,
+        }),
+      });
+      if (!res.ok) throw new Error('Failed to generate image');
+
+      const data = await res.json();
+      const imageUrl = data.imageUrl;
+      updateMenuItem(index, 'image_url', imageUrl);
+
+      alert('Image generated successfully! (Remember to Save Menu if you want to persist this!)');
+    } catch (err) {
+      console.error(err);
+      alert(err.message);
+    } finally {
+      setGeneratingImages((prev) => ({ ...prev, [index]: false }));
+    }
+  };
+
+  // (C) Delete an existing image in local state
+  const deleteImageForItem = (index) => {
+    const yes = confirm('Are you sure you want to remove this image?');
+    if (!yes) return;
+    updateMenuItem(index, 'image_url', '');
+    alert('Image removed. Don’t forget to click Save Menu!');
+  };
+
+  // (D) Enlarge image in a modal
+  const enlargeImage = (imageUrl) => {
+    setEnlargedImageUrl(imageUrl);
+  };
+  const closeEnlargedImage = () => {
+    setEnlargedImageUrl(null);
+  };
+
+  // (Ref1) NEW - Delete Menu function
+  // ---------------------------------
+  const deleteMenuFromDB = async () => {
+    if (!selectedMenuId) {
+      alert('No menu selected to delete.');
+      return;
+    }
+
+    const yes = confirm('Are you sure you want to DELETE this menu? This action cannot be undone.');
+    if (!yes) return;
+
+    try {
+      // (Ref2) This uses the dedicated /api/menus/[menuId] route (or similar)
+      const res = await fetch(`/api/menus/${selectedMenuId}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        throw new Error('Failed to delete menu');
+      }
+
+      // Remove from local savedMenus
+      setSavedMenus((prev) => prev.filter((m) => m.id !== selectedMenuId));
+      // Reset state
+      setSelectedMenuId(null);
+      setMenuName('');
+      setMenuItems([]);
+      setIsMenuChanged(false);
+      alert('Menu deleted!');
+    } catch (error) {
+      console.error('Error deleting menu:', error);
+      alert('Failed to delete menu');
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // RENDER
+  // -------------------------------------------------------------------------
   return (
-    <div className="flex min-h-screen">
+    <div className="flex flex-col md:flex-row min-h-screen">
       {/* LEFT SIDEBAR */}
-      <div className="w-48 bg-white border-r">
+      <div className="w-full md:w-48 bg-white border-r">
         <div className="p-4 font-medium text-gray-800">Website Menu</div>
         <nav className="space-y-1">
           <a
@@ -307,7 +402,7 @@ export default function MenuCreator() {
         </header>
 
         {/* CONTENT */}
-        <div className="p-6 max-w-4xl mx-auto">
+        <div className="p-4 md:p-6 max-w-4xl mx-auto">
           {/* (A) SELECT RESTAURANT */}
           <div className="bg-white rounded-lg shadow-sm mb-6">
             <div className="p-6">
@@ -315,7 +410,7 @@ export default function MenuCreator() {
                 Select a Restaurant
               </label>
               <select
-                className="p-2 border rounded-md text-gray-700"
+                className="p-2 border rounded-md text-gray-700 w-full max-w-xs"
                 value={selectedRestaurantId || ''}
                 onChange={(e) => {
                   const val = e.target.value;
@@ -345,7 +440,7 @@ export default function MenuCreator() {
                     const val = e.target.value;
                     handleMenuSelect(val ? Number(val) : null);
                   }}
-                  className="flex-1 p-2 border rounded-md text-gray-700"
+                  className="flex-1 p-2 border rounded-md text-gray-700 max-w-xs"
                   disabled={!selectedRestaurantId}
                 >
                   <option value="">-- New Menu --</option>
@@ -355,6 +450,17 @@ export default function MenuCreator() {
                     </option>
                   ))}
                 </select>
+
+                {/* (Ref3) NEW - Delete Menu button, shown if a menu is selected */}
+                {selectedMenuId && (
+                  <button
+                    onClick={deleteMenuFromDB}
+                    className="flex items-center gap-1 text-red-600 hover:text-red-700"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Delete Menu
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -365,23 +471,11 @@ export default function MenuCreator() {
               <h2 className="text-lg font-medium text-gray-800 mb-4">
                 Template Style
               </h2>
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 {[
-                  {
-                    id: 'modern',
-                    name: 'Modern',
-                    description: 'Clean and contemporary layout',
-                  },
-                  {
-                    id: 'classic',
-                    name: 'Classic',
-                    description: 'Traditional elegant design',
-                  },
-                  {
-                    id: 'minimal',
-                    name: 'Minimal',
-                    description: 'Simple and straightforward',
-                  },
+                  { id: 'modern', name: 'Modern', description: 'Clean and contemporary layout' },
+                  { id: 'classic', name: 'Classic', description: 'Traditional elegant design' },
+                  { id: 'minimal', name: 'Minimal', description: 'Simple and straightforward' },
                 ].map((template) => (
                   <div
                     key={template.id}
@@ -395,12 +489,8 @@ export default function MenuCreator() {
                         : 'border-gray-200 hover:border-[#FF7A5C]'
                     }`}
                   >
-                    <div className="font-medium text-gray-800 mb-1">
-                      {template.name}
-                    </div>
-                    <div className="text-sm text-gray-600">
-                      {template.description}
-                    </div>
+                    <div className="font-medium text-gray-800 mb-1">{template.name}</div>
+                    <div className="text-sm text-gray-600">{template.description}</div>
                   </div>
                 ))}
               </div>
@@ -428,7 +518,73 @@ export default function MenuCreator() {
             </div>
           )}
 
-          {/* (E) MENU ITEMS */}
+          {/* (E) AI SETTINGS (EXPANDABLE) */}
+          <div className="bg-white rounded-lg shadow-sm mb-6">
+            <div className="p-6">
+              <button
+                onClick={() => setShowAiSettings(!showAiSettings)}
+                className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-100"
+              >
+                {showAiSettings ? 'Hide AI Settings' : 'Show AI Settings'}
+              </button>
+
+              {showAiSettings && (
+                <div className="mt-4 space-y-4">
+                  <h2 className="text-lg font-medium text-gray-800">AI Settings</h2>
+
+                  {/* Brand Voice */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Brand Voice
+                    </label>
+                    <input
+                      type="text"
+                      value={brandVoice}
+                      onChange={(e) => setBrandVoice(e.target.value)}
+                      placeholder="e.g. upscale, fun, quirky..."
+                      className="p-2 border rounded-md w-full text-gray-700"
+                    />
+                  </div>
+
+                  {/* Desired Style */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Desired Style
+                    </label>
+                    <select
+                      value={styleWanted}
+                      onChange={(e) => setStyleWanted(e.target.value)}
+                      className="p-2 border rounded-md w-full text-gray-700"
+                    >
+                      <option value="modern">Modern</option>
+                      <option value="classic">Classic</option>
+                      <option value="rustic">Rustic</option>
+                    </select>
+                  </div>
+
+                  {/* Tone */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Tone
+                    </label>
+                    <select
+                      value={tone}
+                      onChange={(e) => setTone(e.target.value)}
+                      className="p-2 border rounded-md w-full text-gray-700"
+                    >
+                      <option value="friendly">Friendly</option>
+                      <option value="quirky">Quirky</option>
+                      <option value="serious">Serious</option>
+                      <option value="funny">Funny</option>
+                      <option value="romantic">Romantic</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* (F) MENU ITEMS */}
           <div className="bg-white rounded-lg shadow-sm">
             <div className="p-6">
               <h2 className="text-lg font-medium text-gray-800 mb-4">
@@ -437,8 +593,8 @@ export default function MenuCreator() {
 
               {/* Items Table */}
               {menuItems.length > 0 && (
-                <div className="mb-6 overflow-hidden rounded-lg border border-gray-200">
-                  <table className="w-full">
+                <div className="mb-6 overflow-x-auto rounded-lg border border-gray-200">
+                  <table className="w-full min-w-[600px]">
                     <thead className="bg-gray-50">
                       <tr>
                         <th className="px-6 py-3 text-left text-sm font-medium text-gray-700">
@@ -447,51 +603,88 @@ export default function MenuCreator() {
                         <th className="px-6 py-3 text-left text-sm font-medium text-gray-700">
                           Description
                         </th>
-                        <th className="px-6 py-3 text-left text-sm font-medium text-gray-700 w-32">
+                        <th className="px-6 py-3 text-left text-sm font-medium text-gray-700 w-24">
                           Price
                         </th>
-                        <th className="px-6 py-3 text-left text-sm font-medium text-gray-700 w-40">
+                        <th className="px-6 py-3 text-left text-sm font-medium text-gray-700 w-28">
                           Category
                         </th>
-                        <th className="px-6 py-3 text-left text-sm font-medium text-gray-700 w-24">
+                        <th className="px-6 py-3 text-left text-sm font-medium text-gray-700 w-28">
+                          Image
+                        </th>
+                        <th className="px-6 py-3 text-left text-sm font-medium text-gray-700 w-32">
                           Actions
                         </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
-                      {menuItems.map((item, idx) => (
-                        <tr key={item.id ?? idx} className="hover:bg-gray-50">
-                          <td className="px-6 py-4 text-sm text-gray-700">
-                            {item.name || '-'}
-                          </td>
-                          <td className="px-6 py-4 text-sm text-gray-600">
-                            {item.description || '-'}
-                          </td>
-                          <td className="px-6 py-4 text-sm text-gray-700">
-                            ${item.price || '0.00'}
-                          </td>
-                          <td className="px-6 py-4 text-sm text-gray-700">
-                            {item.category || '-'}
-                          </td>
-                          <td className="px-6 py-4 flex gap-3 items-center">
-                            {/* Enhance button */}
-                            <button
-                              onClick={() => enhanceItemDescription(item, idx)}
-                              className="text-blue-600 hover:text-blue-700"
-                            >
-                              Enhance
-                            </button>
-
-                            {/* Delete button */}
-                            <button
-                              onClick={() => removeMenuItem(idx)}
-                              className="text-red-600 hover:text-red-700"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
+                      {menuItems.map((item, idx) => {
+                        const isGenerating = generatingImages[idx] || false;
+                        return (
+                          <tr key={item.id ?? idx} className="hover:bg-gray-50">
+                            <td className="px-6 py-4 text-sm text-gray-700">
+                              {item.name || '-'}
+                            </td>
+                            <td className="px-6 py-4 text-sm text-gray-600">
+                              {item.description || '-'}
+                            </td>
+                            <td className="px-6 py-4 text-sm text-gray-700">
+                              ${item.price || '0.00'}
+                            </td>
+                            <td className="px-6 py-4 text-sm text-gray-700">
+                              {item.category || '-'}
+                            </td>
+                            {/* IMAGE DISPLAY */}
+                            <td className="px-6 py-4 text-sm text-gray-700">
+                              {item.image_url ? (
+                                <div className="flex flex-col space-y-1">
+                                  <img
+                                    src={item.image_url}
+                                    alt={item.name}
+                                    className="w-16 h-16 object-cover rounded cursor-pointer"
+                                    onClick={() => enlargeImage(item.image_url)}
+                                    title="Click to enlarge"
+                                  />
+                                  <button
+                                    onClick={() => deleteImageForItem(idx)}
+                                    className="text-red-600 hover:text-red-700 text-xs"
+                                  >
+                                    Delete Image
+                                  </button>
+                                </div>
+                              ) : isGenerating ? (
+                                <span className="text-sm text-gray-500">
+                                  Generating...
+                                </span>
+                              ) : (
+                                <button
+                                  onClick={() => generateImageForItem(item, idx)}
+                                  className="text-green-600 hover:text-green-700 text-sm"
+                                >
+                                  Gen Image
+                                </button>
+                              )}
+                            </td>
+                            {/* ACTIONS */}
+                            <td className="px-6 py-4 flex gap-2 items-center">
+                              <button
+                                onClick={() => enhanceItemDescription(item, idx)}
+                                className="text-blue-600 hover:text-blue-700 text-sm"
+                                disabled={isGenerating}
+                              >
+                                Enhance
+                              </button>
+                              <button
+                                onClick={() => removeMenuItem(idx)}
+                                className="text-red-600 hover:text-red-700"
+                                disabled={isGenerating}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -499,7 +692,7 @@ export default function MenuCreator() {
 
               {/* Add New Item Form */}
               <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <input
                     type="text"
                     placeholder="Item Name"
@@ -535,11 +728,11 @@ export default function MenuCreator() {
                 <BulkUpload onUploadSuccess={handleBulkUpload} />
               </div>
 
-              {/* Preview & Save buttons */}
-              <div className="flex gap-4 mt-6">
+              {/* Preview & Save Buttons */}
+              <div className="flex flex-col sm:flex-row gap-4 mt-6">
                 <button
                   onClick={() => setShowPreview(true)}
-                  className="flex items-center justify-center flex-1 py-2 border border-[#FF7A5C] text-[#FF7A5C] rounded-md hover:bg-[#FF7A5C] hover:text-white transition-colors"
+                  className="flex items-center justify-center sm:flex-1 py-2 border border-[#FF7A5C] text-[#FF7A5C] rounded-md hover:bg-[#FF7A5C] hover:text-white transition-colors"
                 >
                   <Eye className="w-5 h-5 mr-2" />
                   Preview Menu
@@ -548,7 +741,7 @@ export default function MenuCreator() {
                   <button
                     onClick={saveMenuToDB}
                     disabled={isLoading}
-                    className="flex items-center justify-center flex-1 bg-[#FF7A5C] text-white py-2 rounded-md hover:bg-[#ff6647] disabled:opacity-50 transition-colors"
+                    className="flex items-center justify-center sm:flex-1 bg-[#FF7A5C] text-white py-2 rounded-md hover:bg-[#ff6647] disabled:opacity-50 transition-colors"
                   >
                     {isLoading
                       ? 'Saving...'
@@ -563,7 +756,7 @@ export default function MenuCreator() {
         </div>
       </div>
 
-      {/* Preview Modal */}
+      {/* Preview Modal for entire menu */}
       {showPreview && (
         <MenuPreview
           items={menuItems}
@@ -571,6 +764,25 @@ export default function MenuCreator() {
           menuName={menuName}
           onClose={() => setShowPreview(false)}
         />
+      )}
+
+      {/* ENLARGED IMAGE MODAL */}
+      {enlargedImageUrl && (
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
+          <div className="bg-white p-4 rounded shadow-lg max-w-xl max-h-[80vh] overflow-auto relative">
+            <img
+              src={enlargedImageUrl}
+              alt="Enlarged dish"
+              className="w-full h-auto object-contain"
+            />
+            <button
+              onClick={closeEnlargedImage}
+              className="absolute top-2 right-2 text-white bg-black bg-opacity-50 rounded-full p-2"
+            >
+              <Minimize2 className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -2,28 +2,27 @@ import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 
 /**
- * GET /api/menus?restaurantId=1
- * Fetches all menus for a given restaurant.
+ * GET /api/menus
+ * If ?restaurantId=123 is provided, filter by that restaurant.
+ * Otherwise, return all menus.
  */
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
     const restaurantId = searchParams.get('restaurantId');
 
-    if (!restaurantId) {
-      return NextResponse.json(
-        { error: 'Missing parameter: restaurantId' },
-        { status: 400 }
+    if (restaurantId) {
+      // If restaurantId is provided, return only that restaurant's menus
+      const result = await query(
+        'SELECT * FROM menus WHERE restaurant_id = $1',
+        [restaurantId]
       );
+      return NextResponse.json({ menus: result.rows });
+    } else {
+      // No restaurantId? Return ALL menus
+      const result = await query('SELECT * FROM menus');
+      return NextResponse.json({ menus: result.rows });
     }
-
-    // Query to fetch all menus for the specified restaurant
-    const result = await query(
-      'SELECT * FROM menus WHERE restaurant_id = $1',
-      [restaurantId]
-    );
-
-    return NextResponse.json({ menus: result.rows });
   } catch (err) {
     console.error('Error fetching menus:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
@@ -87,7 +86,7 @@ export async function POST(request) {
 
 /**
  * DELETE /api/menus?menuId=123
- * Deletes the specified menu (and optionally its items)
+ * Deletes the specified menu
  */
 export async function DELETE(request) {
   try {
@@ -100,10 +99,6 @@ export async function DELETE(request) {
         { status: 400 }
       );
     }
-
-    // If you have a foreign key on menu_items (menu_id -> menus.id) with ON DELETE CASCADE,
-    // you don't need to manually delete items here. Otherwise:
-    // await query('DELETE FROM menu_items WHERE menu_id = $1', [menuId]);
 
     const deleteResult = await query(
       'DELETE FROM menus WHERE id = $1 RETURNING *',

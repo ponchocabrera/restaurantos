@@ -3,7 +3,8 @@ import { query } from '@/lib/db';
 
 /**
  * GET /api/menuItems?menuId=123
- * Fetches all items for the specified menu
+ * -> Returns all items from menu_items where menu_id = 123,
+ *    including the "menu_id" column in each row.
  */
 export async function GET(request) {
   try {
@@ -11,52 +12,73 @@ export async function GET(request) {
     const menuId = searchParams.get('menuId');
 
     if (!menuId) {
+      // If user doesn't provide menuId, return 400
       return NextResponse.json(
         { error: 'Missing menuId parameter' },
         { status: 400 }
       );
     }
 
+    // Fetch all items that belong to this menu_id
     const result = await query(
-      'SELECT * FROM menu_items WHERE menu_id = $1',
+      'SELECT * FROM menu_items WHERE menu_id = $1 ORDER BY id ASC',
       [menuId]
     );
 
+    // Return them as JSON
     return NextResponse.json({ menuItems: result.rows });
   } catch (err) {
-    console.error('Error fetching items:', err);
+    console.error('Error fetching menu items:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
 
 /**
  * POST /api/menuItems
- * Upsert (create or update) a single item
- * - If body.id exists, update
- * - Otherwise, insert new
+ * Create or update (upsert) a single item in the menu_items table.
+ * 
+ * Example JSON body:
+ * {
+ *   "id": 16,             // optional; if present we update instead of insert
+ *   "menuId": 10,         // required
+ *   "name": "Burger",
+ *   "description": "Tasty burger",
+ *   "price": 8.99,
+ *   "category": "Main",
+ *   "image_url": ""
+ * }
  */
 export async function POST(request) {
   try {
-    const { id, menuId, name, description, price, category } =
-      await request.json();
+    const body = await request.json();
+    const {
+      id,
+      menuId,
+      name,
+      description = '',
+      price = 0,
+      category = '',
+      image_url = '',
+    } = body;
 
+    // Basic validation
     if (!menuId || !name) {
       return NextResponse.json(
-        { error: 'Missing required fields: menuId, name' },
+        { error: 'Missing required fields: menuId or name' },
         { status: 400 }
       );
     }
 
     if (id) {
-      // ----- Update existing item -----
+      // ----- UPDATE existing item -----
       const updateResult = await query(
         `
           UPDATE menu_items
-          SET name = $2, description = $3, price = $4, category = $5
+          SET name = $2, description = $3, price = $4, category = $5, image_url = $6
           WHERE id = $1
           RETURNING *
         `,
-        [id, name, description, price, category]
+        [id, name, description, price, category, image_url]
       );
 
       if (updateResult.rowCount === 0) {
@@ -65,27 +87,27 @@ export async function POST(request) {
 
       return NextResponse.json({ item: updateResult.rows[0] });
     } else {
-      // ----- Insert new item -----
+      // ----- INSERT new item -----
       const insertResult = await query(
         `
-          INSERT INTO menu_items (menu_id, name, description, price, category)
-          VALUES ($1, $2, $3, $4, $5)
+          INSERT INTO menu_items (menu_id, name, description, price, category, image_url)
+          VALUES ($1, $2, $3, $4, $5, $6)
           RETURNING *
         `,
-        [menuId, name, description || '', price || 0, category || '']
+        [menuId, name, description, price, category, image_url]
       );
 
       return NextResponse.json({ item: insertResult.rows[0] }, { status: 201 });
     }
   } catch (err) {
-    console.error('Error saving item:', err);
+    console.error('Error creating/updating menu item:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
 
 /**
- * DELETE /api/menuItems?itemId=456
- * Deletes the specified item
+ * DELETE /api/menuItems?itemId=16
+ * -> Deletes a single item in menu_items with id=16.
  */
 export async function DELETE(request) {
   try {
@@ -110,7 +132,7 @@ export async function DELETE(request) {
 
     return NextResponse.json({ success: true });
   } catch (err) {
-    console.error('Error deleting item:', err);
+    console.error('Error deleting menu item:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
